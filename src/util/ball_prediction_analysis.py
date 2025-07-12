@@ -1,48 +1,85 @@
 from typing import Callable
 
-from rlbot.utils.structures.ball_prediction_struct import BallPrediction, Slice
+import math
 
-# field length(5120) + ball radius(93) = 5213 however that results in false positives
-GOAL_THRESHOLD = 5235
+def distance_2d(a, b):
+    return math.sqrt((a.x - b.x)**2 + (a.y - b.y)**2)
 
-# We will jump this number of frames when looking for a moment where the ball is inside the goal.
-# Big number for efficiency, but not so big that the ball could go in and then back out during that
-# time span. Unit is the number of frames in the ball prediction, and the prediction is at 60 frames per second.
-GOAL_SEARCH_INCREMENT = 20
-
-
-def find_slice_at_time(ball_prediction: BallPrediction, game_time: float):
+def analyze_ball_prediction(ball_prediction, my_car, goal_location):
     """
-    This will find the future position of the ball at the specified time. The returned
-    Slice object will also include the ball's velocity, etc.
+    Analyzes ball prediction slices to find the best opportunity to score.
+    Returns the target position and time to intercept.
     """
-    start_time = ball_prediction.slices[0].game_seconds
-    approx_index = int((game_time - start_time) * 60)  # We know that there are 60 slices per second.
-    if 0 <= approx_index < ball_prediction.num_slices:
-        return ball_prediction.slices[approx_index]
-    return None
+    best_slice = None
+    min_distance = float('inf')
+    intercept_time = None
 
+    # Loop through prediction slices
+    for slice in ball_prediction.slices:
+        ball_pos = slice.physics.location
+        time = slice.game_seconds
 
-def predict_future_goal(ball_prediction: BallPrediction):
-    """
-    Analyzes the ball prediction to see if the ball will enter one of the goals. Only works on standard arenas.
-    Will return the first ball slice which appears to be inside the goal, or None if it does not enter a goal.
-    """
-    return find_matching_slice(ball_prediction, 0, lambda s: abs(s.physics.location.y) >= GOAL_THRESHOLD,
-                               search_increment=20)
+        # Check if ball is heading towards goal
+        if abs(ball_pos.y - goal_location.y) < 1000:
+            # Calculate distance from car to ball
+            car_to_ball = distance_2d(my_car.physics.location, ball_pos)
+            if car_to_ball < min_distance:
+                min_distance = car_to_ball
+                best_slice = ball_pos
+                intercept_time = time
 
+    return best_slice, intercept_time
 
-def find_matching_slice(ball_prediction: BallPrediction, start_index: int, predicate: Callable[[Slice], bool],
-                        search_increment=1):
+def get_intercept_action(my_car, target_pos, intercept_time):
     """
-    Tries to find the first slice in the ball prediction which satisfies the given predicate. For example,
-    you could find the first slice below a certain height. Will skip ahead through the packet by search_increment
-    for better efficiency, then backtrack to find the exact first slice.
+    Returns controller actions to intercept the ball at the target position.
     """
-    for coarse_index in range(start_index, ball_prediction.num_slices, search_increment):
-        if predicate(ball_prediction.slices[coarse_index]):
-            for j in range(max(start_index, coarse_index - search_increment), coarse_index):
-                ball_slice = ball_prediction.slices[j]
-                if predicate(ball_slice):
-                    return ball_slice
-    return None
+    controller = SimpleControllerState()
+    car_pos = my_car.physics.location
+
+    # Steer towards target
+    angle = math.atan2(target_pos.y - car_pos.y, target_pos.x - car_pos.x)
+    controller.steer = 1 if angle > 0 else -1
+
+    # Use boost if far away or need to reach quickly
+    if distance_2d(car_pos, target_pos) > 1000 and my_car.boost > 0:
+        controller.boost = True
+
+    # Jump for aerial if ball is high
+    if target_pos.z > 300 and my_car.boost > 20:
+        controller.jump = True
+
+    return controller
+
+# Example usage in your bot:
+# best_pos, intercept_time = analyze_ball_prediction(ball_prediction, my_car, goal_location)
+# controller_state = get_intercept_action(my_car, best_pos, intercept_time)
+
+import math
+
+def distance(a, b):
+    return math.sqrt((a.x - b.x)**2 + (a.y - b.y)**2 + (a.z - b.z)**2)
+
+def find_best_scoring_path(my_car, ball, other_cars, goal_location):
+    # Step 1: Scan positions
+    my_pos = my_car.position
+    ball_pos = ball.position
+    # Step 2: Calculate direct path to ball
+    path_to_ball = distance(my_pos, ball_pos)
+    # Step 3: Check for obstacles (other cars)
+    for car in other_cars:
+        if distance(car.position, ball_pos) < 500:  # threshold for blocking
+            # Adjust path or plan a dodge
+            pass
+    # Step 4: Plan shot towards goal
+    ball_to_goal = distance(ball_pos, goal_location)
+    # Step 5: Choose action
+    if path_to_ball < 2000 and ball_to_goal < 3000:
+        action = "boost and shoot"
+    else:
+        action = "position for pass"
+    return action
+
+# Example usage
+action = find_best_scoring_path(my_car, ball, other_cars, goal_location)
+print("AI action:", action)
