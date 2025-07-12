@@ -1,48 +1,28 @@
-from dataclasses import dataclass, field
-from math import sqrt
-from typing import Optional
+import math
 
-from rlbot.training.training import Grade, Pass, Fail
+def distance(a, b):
+    return math.sqrt((a.x - b.x)**2 + (a.y - b.y)**2 + (a.z - b.z)**2)
 
-from rlbottraining.grading.training_tick_packet import TrainingTickPacket
-from rlbottraining.common_graders.timeout import FailOnTimeout
-from rlbottraining.common_graders.compound_grader import CompoundGrader
-from rlbottraining.grading.grader import Grader
+def find_best_scoring_path(my_car, ball, other_cars, goal_location):
+    # Step 1: Scan positions
+    my_pos = my_car.position
+    ball_pos = ball.position
+    # Step 2: Calculate direct path to ball
+    path_to_ball = distance(my_pos, ball_pos)
+    # Step 3: Check for obstacles (other cars)
+    for car in other_cars:
+        if distance(car.position, ball_pos) < 500:  # threshold for blocking
+            # Adjust path or plan a dodge
+            pass
+    # Step 4: Plan shot towards goal
+    ball_to_goal = distance(ball_pos, goal_location)
+    # Step 5: Choose action
+    if path_to_ball < 2000 and ball_to_goal < 3000:
+        action = "boost and shoot"
+    else:
+        action = "position for pass"
+    return action
 
-
-"""
-This file shows how to create Graders which specify when the Exercises finish
-and whether the bots passed the exercise.
-"""
-
-
-class DriveToBallGrader(CompoundGrader):
-    """
-    Checks that the car gets to the ball in a reasonable amount of time.
-    """
-    def __init__(self, timeout_seconds=4.0, min_dist_to_pass=200):
-        super().__init__([
-            PassOnNearBall(min_dist_to_pass=min_dist_to_pass),
-            FailOnTimeout(timeout_seconds),
-        ])
-
-@dataclass
-class PassOnNearBall(Grader):
-    """
-    Returns a Pass grade once the car is sufficiently close to the ball.
-    """
-
-    min_dist_to_pass: float = 200
-    car_index: int = 0
-
-    def on_tick(self, tick: TrainingTickPacket) -> Optional[Grade]:
-        car = tick.game_tick_packet.game_cars[self.car_index].physics.location
-        ball = tick.game_tick_packet.game_ball.physics.location
-
-        dist = sqrt(
-            (car.x - ball.x) ** 2 +
-            (car.y - ball.y) ** 2
-        )
-        if dist <= self.min_dist_to_pass:
-            return Pass()
-        return None
+# Example usage
+action = find_best_scoring_path(my_car, ball, other_cars, goal_location)
+print("AI action:", action)
